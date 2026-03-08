@@ -34,7 +34,7 @@ from src.predictor import (
 )
 from src.model import load_model
 from src.aws_bedrock import (
-    is_bedrock_available, generate_incident_summary, generate_crowd_recommendation,
+    is_bedrock_available, generate_situation_overview, generate_crowd_recommendation,
 )
 from src.aws_storage import get_aws_status, store_incident
 
@@ -204,14 +204,14 @@ section[data-testid="stSidebar"] .block-container {
     padding: 12px 10px !important;
 }
 section[data-testid="stSidebar"] h3 {
-    color:#ffffff !important; font-size:9px !important;
+    color:#ffffff !important; font-size:12px !important;
     text-transform:uppercase; letter-spacing:1px;
     font-family:'JetBrains Mono',monospace !important;
     margin-bottom:8px !important;
 }
 
 .ml-footer {
-    font-size: 10px; color: #ffffff !important; font-family: 'JetBrains Mono', monospace; line-height: 1.4;
+    font-size: 11px; color: #ffffff !important; font-family: 'JetBrains Mono', monospace; line-height: 1.4;
 }
 
 /* ── Animations ── */
@@ -281,10 +281,10 @@ section[data-testid="stSidebar"] h3 {
 /* ── Incident card ── */
 .incident-card{background:#0d0a1e;border:1px solid #1e1560;
                border-left:4px solid #6366F1;border-radius:10px;
-               padding:10px 14px;margin-top:8px;}
-.incident-lbl{font-size:8px;font-weight:700;color:#6366F1;letter-spacing:.8px;
-              margin-bottom:4px;font-family:'JetBrains Mono',monospace;}
-.incident-body{font-size:11px;color:#818CF8;line-height:1.6;}
+               padding:14px 18px;margin-top:8px;}
+.incident-lbl{font-size:12px;font-weight:700;color:#818CF8;letter-spacing:1px;
+              margin-bottom:6px;font-family:'JetBrains Mono',monospace;}
+.incident-body{font-size:15px;color:#e2e8f0;line-height:1.6;}
 
 /* ── Signage card ── */
 .sig-card{border-radius:8px;padding:9px 11px;border-left:3px solid;margin-bottom:6px;}
@@ -633,6 +633,12 @@ def main():
             row = hist.iloc[-1].to_dict()
             row["step"] = step
             row["step_label"] = f"{step//60:02d}:{step%60:02d}"
+            if zone in predictions:
+                row["risk_probability"] = predictions[zone].risk_probability * 100
+                row["time_to_congestion"] = predictions[zone].time_to_congestion
+            else:
+                row["risk_probability"] = 0.0
+                row["time_to_congestion"] = 0.0
             st.session_state[hk][zone].append(row)
 
     def _hdf(zone):
@@ -847,9 +853,9 @@ def main():
                 st.markdown(f"""
                 <div style="text-align:center;background:#06101a;border:1px solid #0a1420;
                             border-radius:6px;padding:5px 2px;margin-bottom:15px;">
-                  <div style="font-size:17px;font-weight:800;color:{rc_};
+                  <div style="font-size:20px;font-weight:800;color:{rc_};
                               font-family:'JetBrains Mono',monospace;line-height:1;">{cnt}</div>
-                  <div style="font-size:7px;color:#ffffff;margin-top:1px;">{lbl}</div>
+                  <div style="font-size:9px;color:#ffffff;margin-top:2px;">{lbl}</div>
                 </div>""", unsafe_allow_html=True)
 
         st.markdown("### Zone Selector")
@@ -871,23 +877,23 @@ def main():
                         border-left:3px solid {zc if isel else 'transparent'};
                         border-radius:8px;padding:9px 11px;margin-bottom:5px;">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
-                <div style="display:flex;align-items:center;gap:5px;">
+                <div style="display:flex;align-items:center;gap:6px;">
                   <span style="background:{zc}18;border:1px solid {zc}38;color:{zc};
-                    font-size:9px;font-weight:800;border-radius:4px;padding:1px 5px;
+                    font-size:11px;font-weight:800;border-radius:4px;padding:2px 6px;
                     font-family:'JetBrains Mono',monospace;">Z{zone[-1]}</span>
-                  <span style="font-size:11px;font-weight:600;color:#ffffff;">{zn.split()[0]}</span>
+                  <span style="font-size:13px;font-weight:600;color:#ffffff;">{zn.split()[0]}</span>
                 </div>
                 <span style="background:{rbg_};border:1px solid {rc_}44;color:{rc_};
-                  font-size:7.5px;font-weight:700;border-radius:3px;padding:2px 6px;
+                  font-size:9px;font-weight:700;border-radius:3px;padding:3px 7px;
                   font-family:'JetBrains Mono',monospace;{anim}">{_rl(lv)}</span>
               </div>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:5px;">
-                <div><div style="font-size:7px;color:#ffffff;">DENSITY</div>
-                  <span style="font-size:12px;color:#EF4444;font-weight:700;font-family:'JetBrains Mono',monospace;">{d:.1f}</span>
-                  <span style="color:#ffffff;font-size:7px;"> p/m²</span></div>
-                <div><div style="font-size:7px;color:#ffffff;">VELOCITY</div>
-                  <span style="font-size:12px;color:#22D3EE;font-weight:700;font-family:'JetBrains Mono',monospace;">{v:.1f}</span>
-                  <span style="color:#ffffff;font-size:7px;"> m/s</span></div>
+                <div><div style="font-size:9px;color:#ffffff;">DENSITY</div>
+                  <span style="font-size:15px;color:#EF4444;font-weight:700;font-family:'JetBrains Mono',monospace;">{d:.1f}</span>
+                  <span style="color:#ffffff;font-size:9px;"> p/m²</span></div>
+                <div><div style="font-size:9px;color:#ffffff;">VELOCITY</div>
+                  <span style="font-size:15px;color:#22D3EE;font-weight:700;font-family:'JetBrains Mono',monospace;">{v:.1f}</span>
+                  <span style="color:#ffffff;font-size:9px;"> m/s</span></div>
               </div>
               <div style="height:2px;background:#0a1420;border-radius:2px;overflow:hidden;">
                 <div style="height:100%;width:{pct:.0f}%;background:{rc_};box-shadow:0 0 4px {rc_}55;border-radius:2px;"></div>
@@ -966,34 +972,43 @@ def main():
         st.markdown('<div class="scroll-hint">↓ click 📊 Charts to view analytics</div>',
                     unsafe_allow_html=True)
 
-        # AI incident brief
-        if any_crit:
-            zsum = {z: dict(risk_probability=p.risk_probability,
-                            risk_level=p.risk_level,
-                            density=zd.get(z,0.), velocity=zv.get(z,0.),
-                            time_to_congestion=p.time_to_congestion)
-                    for z,p in predictions.items()}
-            bk = f"brief_{step}"
-            if is_bedrock_available() and get_use_bedrock():
-                if bk not in st.session_state:
-                    brief = generate_incident_summary(zsum)
-                    st.session_state[bk] = brief or \
-                        "⚠️ Multiple zones at critical risk — deploy crowd control immediately."
-                    store_incident(incident_id=f"INC-{step}-{int(time.time())}",
-                                   zone_data=zsum, summary=st.session_state[bk],
-                                   scenario=scenario)
-                body = st.session_state[bk]
-                lbl  = "🧠 AI INCIDENT BRIEF — Amazon Bedrock"
-            else:
-                rz = [z for z,p in predictions.items() if p.risk_level=="red"]
+        # AI Situation Overview
+        zsum = {z: dict(risk_probability=p.risk_probability,
+                        risk_level=p.risk_level,
+                        density=zd.get(z,0.), velocity=zv.get(z,0.),
+                        time_to_congestion=p.time_to_congestion)
+                for z,p in predictions.items()}
+        bk = f"overview_{step}"
+        if is_bedrock_available() and get_use_bedrock():
+            if bk not in st.session_state:
+                brief = generate_situation_overview(zsum)
+                st.session_state[bk] = brief or \
+                    "All zones operating normally. Continue monitoring crowd metrics."
+                store_incident(incident_id=f"OVR-{step}-{int(time.time())}",
+                               zone_data=zsum, summary=st.session_state[bk],
+                               scenario=scenario)
+            body = st.session_state[bk]
+            lbl  = "🧠 AI SITUATION OVERVIEW — Amazon Bedrock"
+        else:
+            rz = [z for z,p in predictions.items() if p.risk_level=="red"]
+            if rz:
                 body = (f"CRITICAL: {', '.join(rz)} at RED risk. "
                         "Deploy crowd control teams immediately. Activate alternate routing.")
                 lbl  = "⚠️ SYSTEM ALERT"
-            st.markdown(f"""
-            <div class="incident-card">
-              <div class="incident-lbl">{lbl}</div>
-              <div class="incident-body">{body}</div>
-            </div>""", unsafe_allow_html=True)
+            else:
+                yz = [z for z,p in predictions.items() if p.risk_level=="yellow"]
+                if yz:
+                    body = f"WARNING: {', '.join(yz)} at YELLOW risk. Monitor closely."
+                    lbl  = "⚠️ SYSTEM WARNING"
+                else:
+                    body = "All zones operating within normal parameters."
+                    lbl  = "✅ SYSTEM NORMAL"
+                    
+        st.markdown(f"""
+        <div class="incident-card" style="margin-top:15px; border-left-color: {'#EF4444' if any_crit else '#3b82f6'}; background: {'#180e12' if any_crit else '#081220'};">
+          <div class="incident-lbl" style="color: {'#EF4444' if any_crit else '#60a5fa'}">{lbl}</div>
+          <div class="incident-body">{body}</div>
+        </div>""", unsafe_allow_html=True)
 
     # ══════════════════════════════════════════════════════════════════════
     #  CHARTS VIEW  — selected zone only
@@ -1104,6 +1119,16 @@ def main():
                 config={"displayModeBar":False}, key=f"r2_v_{step}")
             st.markdown(f'<div class="chart-n">{n_samples} pts</div>',
                          unsafe_allow_html=True)
+
+        # ── ROW 3  — AI Analysis for selected zone ─────────────────────────
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+        st.markdown('<div class="row-lbl">AI Analysis — Selected Zone 🧠</div>',
+                    unsafe_allow_html=True)
+        r3 = st.columns(2)
+        chart_card(r3[0], df_s, "time_to_congestion", "Time to Congestion", "min", "#22C55E",
+                   [0, 15], [0, 5, 10, 15], None, "", f"r3_ttc_{selected}_{step}", n_samples)
+        chart_card(r3[1], df_s, "risk_probability", "Congestion Probability", "%", "#EF4444",
+                   [0, 100], [0, 25, 50, 75, 100], 70, "high risk", f"r3_rp_{selected}_{step}", n_samples)
 
         # ── Signage for selected zone ──────────────────────────────────────
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)

@@ -139,10 +139,10 @@ Do not include any prefix, label, or emoji — just the message text."""
     return _invoke_bedrock(prompt, max_tokens=60)
 
 
-def generate_incident_summary(zone_data: dict) -> Optional[str]:
+def generate_situation_overview(zone_data: dict) -> Optional[str]:
     """
-    Generate a natural-language incident brief for event organizers
-    using Bedrock when a Red alert is triggered.
+    Generate a natural-language situation overview for event organizers
+    using Bedrock covering the current crowd state across all zones.
 
     Args:
         zone_data: dict mapping zone_id to {risk_probability, risk_level,
@@ -161,13 +161,13 @@ def generate_incident_summary(zone_data: dict) -> Optional[str]:
         )
     zone_summary = "\n".join(zone_summary_lines)
 
-    prompt = f"""You are a crowd safety AI analyst. Write a concise 3-sentence incident brief 
+    prompt = f"""You are a crowd safety AI analyst. Write a concise 3-sentence situation overview 
 for event organizers based on this real-time data:
 
 {zone_summary}
 
-Include: (1) what's happening, (2) which zones are affected and severity, 
-(3) recommended immediate action. Be factual and actionable. No markdown formatting."""
+Include: (1) the current overall status, (2) which zones need attention (if any) and their severity, 
+(3) recommended proactive or immediate action. Be factual and actionable. No markdown formatting."""
 
     return _invoke_bedrock(prompt, max_tokens=150)
 
