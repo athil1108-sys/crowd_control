@@ -12,11 +12,11 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 # Activate venv
 if [ -d "venv" ]; then
     echo "✅ Activating virtual environment..."
-    source venv/bin/activate
+    source venv/Scripts/activate
 else
     echo "⚠️  No venv found. Creating one..."
     python -m venv venv
-    source venv/bin/activate
+    source venv/Scripts/activate
     pip install -r requirements.txt
 fi
 

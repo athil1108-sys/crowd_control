@@ -18,7 +18,12 @@ What value the AI layer adds:
 
 import json
 import logging
+import os
 from typing import Optional
+from dotenv import load_dotenv
+
+# Load AWS credentials from .env
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 

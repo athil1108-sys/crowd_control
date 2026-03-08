@@ -1,319 +1,237 @@
 """
-Prediction Logic Module
-=======================
-Takes a trained model and live feature data → outputs actionable predictions.
+predictor.py
+============
+Real-time prediction logic for CrowdAI.
 
-Outputs:
-  1. Risk Probability (0–1)
-  2. Risk Level (Green / Yellow / Red)
-  3. Estimated time-to-congestion (minutes)
-  4. Signage message (if high risk)
+Responsibilities:
+  - Take engineered features for a zone and run them through the trained model
+  - Compute risk level, risk colour, time-to-congestion estimate
+  - Generate digital signage messages (static templates or Amazon Bedrock)
+  - Return a PredictionResult dataclass consumed by app.py
 
-Signage trigger logic:
-  - prob > 0.7 → Trigger zone-specific redirect message
-  - prob > 0.85 → Trigger emergency-level message
+Risk thresholds (matching README):
+  Green  — risk probability  < 40%
+  Yellow — risk probability 40% – 70%
+  Red    — risk probability  > 70%
 """
 
-import logging
+from __future__ import annotations
+
+import random
+from dataclasses import dataclass, field
+from typing import Any
+
 import numpy as np
-import pandas as pd
-from dataclasses import dataclass
-from datetime import datetime
 
-try:
-    from src.model import load_model
-    from src.features import get_feature_columns, get_realtime_features, PREDICTION_HORIZON
-    from src.aws_bedrock import generate_signage_message as bedrock_signage, is_bedrock_available
-    from src.aws_storage import store_prediction, is_dynamodb_available
-except ImportError:
-    from model import load_model
-    from features import get_feature_columns, get_realtime_features, PREDICTION_HORIZON
-    try:
-        from aws_bedrock import generate_signage_message as bedrock_signage, is_bedrock_available
-        from aws_storage import store_prediction, is_dynamodb_available
-    except ImportError:
-        bedrock_signage = None
-        is_bedrock_available = lambda: False
-        store_prediction = lambda **kwargs: False
-        is_dynamodb_available = lambda: False
+# ── Thresholds ────────────────────────────────────────────────────────────────
+YELLOW_THRESHOLD = 0.40   # 40%
+RED_THRESHOLD    = 0.70   # 70%
 
-logger = logging.getLogger(__name__)
+# ── Bedrock toggle (module-level state) ───────────────────────────────────────
+_use_bedrock: bool = False
 
-# ── Bedrock usage flag (can be toggled from dashboard) ──
-_use_bedrock = True
-
-
-def set_use_bedrock(enabled: bool):
-    """Toggle Bedrock-powered signage on/off."""
+def set_use_bedrock(enabled: bool) -> None:
     global _use_bedrock
     _use_bedrock = enabled
 
-
 def get_use_bedrock() -> bool:
-    """Check if Bedrock signage is enabled."""
-    return _use_bedrock and is_bedrock_available()
+    return _use_bedrock
 
 
-# ── Signage messages per zone ──
-SIGNAGE_MESSAGES = {
-    "Zone_A": {
-        "warning": "⚠️ Zone A: Crowd building. Please consider Gate B.",
-        "critical": "🚨 Zone A RESTRICTED — Redirect to Gate B immediately!",
-        "emergency": "🆘 EMERGENCY: Zone A blocked. Use Alternate Exit NOW!",
-    },
-    "Zone_B": {
-        "warning": "⚠️ Zone B: Moderate congestion ahead. Use side corridor.",
-        "critical": "🚨 Zone B congested — Redirect to Zone C entrance!",
-        "emergency": "🆘 EMERGENCY: Zone B blocked. Follow evacuation signs!",
-    },
-    "Zone_C": {
-        "warning": "⚠️ Zone C: Increasing crowd density. Allow extra time.",
-        "critical": "🚨 Zone C approaching capacity — Use Alternate Exit!",
-        "emergency": "🆘 EMERGENCY: All zones critical. Follow staff directions!",
-    },
-}
-
-# Risk thresholds
-YELLOW_THRESHOLD = 0.4
-RED_THRESHOLD = 0.7
-EMERGENCY_THRESHOLD = 0.85
-
-
+# ── PredictionResult ──────────────────────────────────────────────────────────
 @dataclass
 class PredictionResult:
-    """Structured prediction output for one zone."""
-    zone_id: str
-    risk_probability: float
-    risk_level: str         # "green", "yellow", "red"
-    risk_color: str         # hex color for UI
-    time_to_congestion: float  # minutes, -1 if no risk
-    signage_message: str    # empty if no action needed
-    signage_active: bool
+    """
+    All outputs for a single zone at a single simulation step.
+
+    Fields used by app.py
+    ---------------------
+    zone_id            : e.g. "Zone A"
+    risk_probability   : float 0-1
+    risk_level         : "green" | "yellow" | "red"
+    risk_color         : hex string for UI colouring
+    time_to_congestion : estimated minutes until congestion (0 = no risk)
+    signage_active     : True when risk >= RED_THRESHOLD
+    signage_message    : human-readable text for the digital sign
+    density            : latest raw density reading  (p/m²)  ← used by detail view
+    velocity           : latest raw velocity reading (m/s)   ← used by detail view
+    grid               : 2-D heatmap grid — filled by app.py after predict_zone()
+    """
+    zone_id            : str
+    risk_probability   : float
+    risk_level         : str                          # "green" | "yellow" | "red"
+    risk_color         : str                          # hex colour
+    time_to_congestion : int                          # minutes, 0 = no risk
+    signage_active     : bool
+    signage_message    : str
+    density            : float = 0.0                 # raw density  (p/m²)
+    velocity           : float = 0.0                 # raw velocity (m/s)
+    grid               : list  = field(default_factory=list)  # heatmap grid (set in app.py)
 
 
-def get_risk_level(prob: float) -> tuple[str, str]:
-    """Map probability to risk level and color."""
+# ── Risk helpers ──────────────────────────────────────────────────────────────
+def _risk_level(prob: float) -> str:
     if prob >= RED_THRESHOLD:
-        return "red", "#FF4444"
-    elif prob >= YELLOW_THRESHOLD:
-        return "yellow", "#FFAA00"
-    else:
-        return "green", "#44BB44"
+        return "red"
+    if prob >= YELLOW_THRESHOLD:
+        return "yellow"
+    return "green"
 
 
-def estimate_time_to_congestion(
-    prob: float,
-    density_rate: float,
-    current_density: float,
-    interval_seconds: int = 30,
-) -> float:
+def _risk_color(level: str) -> str:
+    return {
+        "red":    "#EF4444",
+        "yellow": "#F59E0B",
+        "green":  "#10B981",
+    }.get(level, "#10B981")
+
+
+def _time_to_congestion(prob: float, level: str) -> int:
     """
-    Estimate minutes until congestion based on:
-    - Current risk probability
-    - Rate of density change
-    - Distance from density threshold
+    Estimate minutes until congestion based on risk probability.
 
-    Returns -1 if no congestion is expected.
+    Logic mirrors the README description of 10-15 min prediction window:
+      Red    →  2–8  min  (imminent)
+      Yellow →  9–15 min  (building)
+      Green  →  0        (no risk)
     """
-    if prob < YELLOW_THRESHOLD:
-        return -1.0
-
-    density_threshold = 4.0  # Same as in features.py
-
-    if density_rate <= 0.01:
-        # Density not increasing — can't estimate time
-        if prob >= RED_THRESHOLD:
-            return 2.0  # Already near/at congestion
-        return -1.0
-
-    # Steps until density reaches threshold
-    density_gap = max(density_threshold - current_density, 0.1)
-    steps_to_threshold = density_gap / max(density_rate, 0.01)
-    minutes_to_congestion = (steps_to_threshold * interval_seconds) / 60.0
-
-    # Clamp to reasonable range
-    minutes_to_congestion = max(0.5, min(minutes_to_congestion, 30.0))
-
-    # If already high risk, override with short time
-    if prob >= EMERGENCY_THRESHOLD:
-        minutes_to_congestion = min(minutes_to_congestion, 2.0)
-    elif prob >= RED_THRESHOLD:
-        minutes_to_congestion = min(minutes_to_congestion, 8.0)
-
-    return round(minutes_to_congestion, 1)
+    if level == "red":
+        # Higher probability = less time remaining
+        base = max(2, int((1.0 - prob) * 20))
+        return min(base, 8)
+    if level == "yellow":
+        base = max(9, int((1.0 - prob) * 30))
+        return min(base, 15)
+    return 0
 
 
-def get_signage_message(
+# ── Static signage templates ──────────────────────────────────────────────────
+_SIGNAGE_GREEN = [
+    "✅ {zone} is clear — enjoy the event!",
+    "✅ Normal flow in {zone}. No action needed.",
+    "✅ {zone} operating normally. All clear.",
+]
+
+_SIGNAGE_YELLOW = [
+    "⚡ {zone} getting busy — consider using an alternate route.",
+    "⚡ Elevated crowd levels in {zone}. Stewards on standby.",
+    "⚡ {zone} approaching capacity. Please spread out.",
+    "⚡ Crowd building in {zone} — ~{ttc} min to peak. Use Gate B as alternate.",
+]
+
+_SIGNAGE_RED = [
+    "⚠️ {zone} CRITICAL — congestion expected in ~{ttc} min. Please use alternate exits.",
+    "🚨 URGENT: {zone} at capacity. Crowd control deployed. Use alternate route NOW.",
+    "🚨 {zone} RED ALERT — redirect immediately. Congestion in ~{ttc} min.",
+    "⚠️ CROWDAI ALERT: {zone} critical. All stewards to {zone} immediately.",
+]
+
+
+def _static_signage(zone_id: str, level: str, ttc: int) -> str:
+    templates = {
+        "green":  _SIGNAGE_GREEN,
+        "yellow": _SIGNAGE_YELLOW,
+        "red":    _SIGNAGE_RED,
+    }.get(level, _SIGNAGE_GREEN)
+
+    template = random.choice(templates)
+    return template.format(zone=zone_id, ttc=ttc)
+
+
+# ── Bedrock signage wrapper ───────────────────────────────────────────────────
+def _bedrock_signage(
     zone_id: str,
-    prob: float,
-    density: float = 0.0,
-    velocity: float = 0.0,
-    time_to_congestion: float = -1.0,
-) -> tuple[str, bool, bool]:
+    level: str,
+    ttc: int,
+    density: float,
+    velocity: float,
+) -> str | None:
     """
-    Get the appropriate digital signage message for a zone based on risk.
-    Tries Amazon Bedrock first for AI-generated messages, falls back to static templates.
-
-    Returns (message, is_active, used_bedrock).
+    Attempt to generate a signage message via Amazon Bedrock.
+    Returns None if Bedrock is unavailable or raises an exception.
     """
-    # Determine risk level for Bedrock prompt
-    if prob >= EMERGENCY_THRESHOLD:
-        risk_label = "emergency"
-    elif prob >= RED_THRESHOLD:
-        risk_label = "critical"
-    elif prob >= YELLOW_THRESHOLD:
-        risk_label = "warning"
-    else:
-        return "✅ Normal flow. No action required.", False, False
-
-    # ── Try Bedrock AI-generated message ──
-    used_bedrock = False
-    if get_use_bedrock() and bedrock_signage is not None:
-        try:
-            ai_message = bedrock_signage(
-                zone_id=zone_id,
-                risk_level=risk_label,
-                risk_probability=prob,
-                density=density,
-                velocity=velocity,
-                time_to_congestion=time_to_congestion,
-            )
-            if ai_message:
-                # Add appropriate emoji prefix
-                if risk_label == "emergency":
-                    prefix = "🆘 "
-                elif risk_label == "critical":
-                    prefix = "🚨 "
-                else:
-                    prefix = "⚠️ "
-                used_bedrock = True
-                return f"{prefix}{ai_message}", True, True
-        except Exception as e:
-            logger.warning(f"Bedrock signage failed, using fallback: {e}")
-
-    # ── Fallback: static template messages ──
-    zone_messages = SIGNAGE_MESSAGES.get(zone_id, SIGNAGE_MESSAGES["Zone_A"])
-    return zone_messages[risk_label], True, False
+    try:
+        from src.aws_bedrock import generate_crowd_recommendation, is_bedrock_available
+        if not is_bedrock_available():
+            return None
+        zone_data = {
+            "risk_level":         level,
+            "risk_probability":   RED_THRESHOLD if level == "red" else YELLOW_THRESHOLD if level == "yellow" else 0.1,
+            "density":            density,
+            "velocity":           velocity,
+            "time_to_congestion": ttc,
+        }
+        return generate_crowd_recommendation(zone_id, zone_data)
+    except Exception:
+        return None
 
 
+# ── Core prediction function ──────────────────────────────────────────────────
 def predict_zone(
-    zone_id: str,
-    features: dict,
-    model=None,
-    scaler=None,
+    zone_id:  str,
+    features: dict[str, Any],
+    model:    Any,
+    scaler:   Any,
 ) -> PredictionResult:
     """
-    Make a full prediction for one zone given its current features.
-    Returns a structured PredictionResult.
-    """
-    if model is None or scaler is None:
-        model, scaler = load_model()
+    Run the trained model for one zone and return a PredictionResult.
 
+    Parameters
+    ----------
+    zone_id  : zone identifier, e.g. "Zone A"
+    features : dict produced by src.features.get_realtime_features()
+               Expected keys (7 features, matching model training):
+                 - rolling_density_mean
+                 - rolling_velocity_mean
+                 - density_rate_of_change
+                 - velocity_rate_of_change
+                 - density_velocity_ratio
+                 - density
+                 - velocity
+    model    : trained sklearn estimator (LogisticRegression)
+    scaler   : fitted sklearn scaler (StandardScaler)
+
+    Returns
+    -------
+    PredictionResult
+    """
+    from src.features import get_feature_columns
+
+    # ── Build feature vector in the exact column order used at training ──
     feature_cols = get_feature_columns()
-    feature_vector = np.array([[features.get(col, 0) for col in feature_cols]])
+    X_raw = np.array([[features[col] for col in feature_cols]])
 
-    # Scale features and predict probability
-    feature_scaled = scaler.transform(feature_vector)
-    prob = model.predict_proba(feature_scaled)[0][1]
+    # ── Scale ──
+    X_scaled = scaler.transform(X_raw)
 
-    # Derive all outputs
-    risk_level, risk_color = get_risk_level(prob)
-    time_to_cong = estimate_time_to_congestion(
-        prob=prob,
-        density_rate=features.get("density_rate_of_change", 0),
-        current_density=features.get("density", 0),
+    # ── Predict ──
+    prob  = float(model.predict_proba(X_scaled)[0][1])   # probability of congestion
+    level = _risk_level(prob)
+    color = _risk_color(level)
+    ttc   = _time_to_congestion(prob, level)
+
+    # ── Raw sensor values (for KPI tiles and detail view) ──
+    density  = float(features.get("density",  0.0))
+    velocity = float(features.get("velocity", 0.0))
+
+    # ── Signage message ──
+    signage_active = level == "red"
+
+    if _use_bedrock and signage_active:
+        message = _bedrock_signage(zone_id, level, ttc, density, velocity) \
+                  or _static_signage(zone_id, level, ttc)
+    else:
+        message = _static_signage(zone_id, level, ttc)
+
+    return PredictionResult(
+        zone_id            = zone_id,
+        risk_probability   = prob,
+        risk_level         = level,
+        risk_color         = color,
+        time_to_congestion = ttc,
+        signage_active     = signage_active,
+        signage_message    = message,
+        density            = density,
+        velocity           = velocity,
+        grid               = [],        # populated by app.py after this call
     )
-    message, signage_active, used_bedrock = get_signage_message(
-        zone_id=zone_id,
-        prob=prob,
-        density=features.get("density", 0),
-        velocity=features.get("velocity", 0),
-        time_to_congestion=time_to_cong,
-    )
-
-    result = PredictionResult(
-        zone_id=zone_id,
-        risk_probability=round(prob, 4),
-        risk_level=risk_level,
-        risk_color=risk_color,
-        time_to_congestion=time_to_cong,
-        signage_message=message,
-        signage_active=signage_active,
-    )
-
-    # ── Log prediction to DynamoDB (async-safe, non-blocking) ──
-    if is_dynamodb_available():
-        try:
-            store_prediction(
-                zone_id=zone_id,
-                timestamp=datetime.utcnow().isoformat(),
-                risk_probability=prob,
-                risk_level=risk_level,
-                density=features.get("density", 0),
-                velocity=features.get("velocity", 0),
-                time_to_congestion=time_to_cong,
-                signage_message=message,
-            )
-        except Exception as e:
-            logger.debug(f"DynamoDB logging skipped: {e}")
-
-    return result
-
-
-def predict_all_zones(
-    zone_histories: dict[str, pd.DataFrame],
-    model=None,
-    scaler=None,
-) -> dict[str, PredictionResult]:
-    """
-    Predict congestion risk for all zones given their recent history.
-    zone_histories: {zone_id: DataFrame of recent readings}
-    """
-    if model is None or scaler is None:
-        model, scaler = load_model()
-
-    results = {}
-    for zone_id, history_df in zone_histories.items():
-        features = get_realtime_features(history_df)
-        if features:
-            results[zone_id] = predict_zone(zone_id, features, model, scaler)
-
-    return results
-
-
-if __name__ == "__main__":
-    # Quick test with synthetic features
-    model, scaler = load_model()
-
-    # Simulate a normal situation
-    normal_features = {
-        "density": 1.2,
-        "velocity": 1.5,
-        "rolling_density_mean": 1.1,
-        "rolling_velocity_mean": 1.5,
-        "density_rate_of_change": 0.02,
-        "velocity_rate_of_change": -0.01,
-        "density_velocity_ratio": 0.8,
-    }
-
-    # Simulate a pre-congestion situation
-    risky_features = {
-        "density": 3.8,
-        "velocity": 0.6,
-        "rolling_density_mean": 3.2,
-        "rolling_velocity_mean": 0.8,
-        "density_rate_of_change": 0.35,
-        "velocity_rate_of_change": -0.15,
-        "density_velocity_ratio": 6.3,
-    }
-
-    print("── Normal Situation ──")
-    result = predict_zone("Zone_A", normal_features, model, scaler)
-    print(f"   Risk: {result.risk_probability:.1%} ({result.risk_level})")
-    print(f"   Signage: {result.signage_message}")
-
-    print("\n── Pre-Congestion Situation ──")
-    result = predict_zone("Zone_A", risky_features, model, scaler)
-    print(f"   Risk: {result.risk_probability:.1%} ({result.risk_level})")
-    print(f"   Time to congestion: {result.time_to_congestion} min")
-    print(f"   Signage: {result.signage_message}")

@@ -4,7 +4,9 @@ pandas
 numpy
 plotly
 joblib
+Pillow
 
 # AWS Integration
 boto3
 botocore
+python-dotenv

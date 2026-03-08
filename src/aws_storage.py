@@ -16,6 +16,10 @@ import time
 import logging
 from typing import Optional
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Load AWS credentials from .env
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 

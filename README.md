@@ -115,6 +115,8 @@ Streamlit real-time dashboard with:
 - Auto-updating digital signage
 - Scenario switching
 - 2-second refresh rate
+- **Responsive, perfectly centered control headers with a persistent sticky navigation bar.**
+- **White high-contrast sidebar metrics for maximum readability.**
 
 ---
 
