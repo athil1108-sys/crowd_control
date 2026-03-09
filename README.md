@@ -3,7 +3,8 @@
 An ML-powered crowd management system that predicts congestion **10-15 minutes before it happens** using simulated mmWave radar sensor data. Built as a software-only prototype — no hardware required.
 
 ![Python](https://img.shields.io/badge/Python-3.11+-blue)
-![Streamlit](https://img.shields.io/badge/Streamlit-Dashboard-red)
+![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688)
+![Vanilla JS](https://img.shields.io/badge/Vanilla_JS-Frontend-F7DF1E)
 ![scikit--learn](https://img.shields.io/badge/scikit--learn-ML-orange)
 
 ---
@@ -12,10 +13,14 @@ An ML-powered crowd management system that predicts congestion **10-15 minutes b
 
 ```
 crowd-management/
-├── app.py                  # Streamlit dashboard (main entry point)
-├── run.sh                  # One-click startup script
+├── fastapi_app.py          # FastAPI backend (main entry point)
+├── Dockerfile              # Container deployment config
 ├── requirements.txt        # Python dependencies
 ├── README.md
+├── static/                 # Vanilla JS, CSS, and HTML dashboard
+│   ├── index.html
+│   ├── css/style.css
+│   └── js/script.js
 ├── src/
 │   ├── __init__.py
 │   ├── simulate_data.py    # Sensor data simulation (3 scenarios)
@@ -23,8 +28,7 @@ crowd-management/
 │   ├── model.py            # ML model training & evaluation
 │   ├── predictor.py        # Real-time prediction logic
 │   ├── aws_bedrock.py      # Amazon Bedrock signage & incident briefs
-│   ├── aws_storage.py      # S3 model storage & DynamoDB history
-│   └── lambda_handler.py   # AWS Lambda prediction endpoint
+│   └── aws_storage.py      # S3 model storage & DynamoDB history
 ├── models/
 │   ├── congestion_model.pkl  # Trained Logistic Regression model
 │   └── scaler.pkl            # Feature scaler
@@ -35,29 +39,28 @@ crowd-management/
 
 ## 🚀 How to Run
 
-### Quick Start
+### Quick Start (Local Web Server)
 ```bash
 # Make sure you're in the project directory
 cd crowd-management
 
-# Option 1: Use the run script
-./run.sh
+# Create and activate virtual environment
+python -m venv venv
+source venv/bin/activate  # (or venv\Scripts\activate on Windows)
 
-# Option 2: Manual steps
-source venv/bin/activate
-python -m src.model          # Train the model (first time only)
-streamlit run app.py         # Launch the dashboard
+# Install dependencies
+pip install -r requirements.txt
+
+# Run the backend locally
+uvicorn fastapi_app:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Then open **http://localhost:8501** in your browser.
+Then open **http://localhost:8000** in your browser.
 
-### From Scratch
+### Run via Docker
 ```bash
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-python -m src.model
-streamlit run app.py
+docker build -t crowdai-app .
+docker run -p 8000:8000 crowdai-app
 ```
 
 ---
@@ -107,8 +110,9 @@ For each zone, outputs:
 - **Time to Congestion** (estimated minutes)
 - **Digital Signage Message** (auto-triggered when risk > 70%)
 
-### 5. Dashboard (`app.py`)
-Streamlit real-time dashboard with:
+### 5. Dashboard (`static/`)
+A completely native HTML/JS/CSS dashboard connected to the FastAPI backend:
+- Dynamic REST API polling for real-time simulation updates
 - Live density & velocity charts per zone
 - Risk probability gauges
 - Color-coded risk cards
@@ -158,13 +162,13 @@ We achieve prediction by shifting the target label backward in time, so the mode
 ### System Architecture
 ```
 ┌─────────────────┐    ┌──────────────┐    ┌─────────────────┐    ┌───────────┐
-│  Streamlit App   │───▶│ API Gateway  │───▶│  AWS Lambda     │───▶│ DynamoDB  │
-│  (AWS Amplify)   │    │  (REST API)  │    │  (Prediction)   │    │ (History) │
+│ Vanilla JS Web  │───▶│ FastAPI Server│───▶│   AWS Lambda    │───▶│ DynamoDB  │
+│ Dashboard App   │    │  (Container)  │    │  (Prediction)   │    │ (History) │
 └─────────────────┘    └──────────────┘    └────────┬────────┘    └───────────┘
                                                     │
                                            ┌────────▼────────┐    ┌───────────┐
-                                           │ Amazon Bedrock   │    │ Amazon S3 │
-                                           │ (Claude 3 Haiku) │    │ (Models)  │
+                                           │ Amazon Bedrock  │    │ Amazon S3 │
+                                           │(Claude 3 Haiku) │    │ (Models)  │
                                            └─────────────────┘    └───────────┘
 ```
 
@@ -180,7 +184,7 @@ Static rule-based systems can only **detect** congestion after it happens. Our M
 | **Amazon API Gateway** | REST API fronting the prediction Lambda | POST `/predict` endpoint |
 | **Amazon S3** | Store trained model artifacts (`.pkl` files) | `src/aws_storage.py` |
 | **Amazon DynamoDB** | Persist historical readings & prediction audit trail | `src/aws_storage.py` |
-| **AWS Amplify** | Host the Streamlit dashboard | Production deployment |
+| **AWS App Runner** | Host the containerized FastAPI/JS application | Dockerfile deployment |
 
 ### What Value the AI Layer Adds
 1. **Predictive ML model** — 10-15 min early warning (92% accuracy) vs reactive detection
