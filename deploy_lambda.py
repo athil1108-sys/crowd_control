@@ -1,3 +1,4 @@
+# pyre-ignore-all-errors[21]
 import os
 import zipfile
 import boto3

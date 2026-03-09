@@ -1,4 +1,5 @@
 """
+# pyre-ignore-all-errors[21]
 AWS Bedrock Integration Module
 ==============================
 Uses Amazon Bedrock (Claude 3 Haiku) to generate:
