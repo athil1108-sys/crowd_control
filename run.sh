@@ -28,8 +28,8 @@ if [ ! -f "models/congestion_model.pkl" ]; then
 fi
 
 echo ""
-echo "🚀 Launching Streamlit dashboard..."
-echo "   Open http://localhost:8501 in your browser"
+echo "🚀 Launching FastAPI dashboard..."
+echo "   Open http://localhost:8000 in your browser"
 echo ""
 
-streamlit run app.py --server.headless true
+uvicorn fastapi_app:app --host 127.0.0.1 --port 8000 --reload
