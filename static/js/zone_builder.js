@@ -29,11 +29,13 @@ class ZoneBuilder {
 
     _initEvents() {
         this.canvas.addEventListener('mousedown', (e) => {
+            if (this.namingMode) return;
             const p = this._getPos(e);
             this.isDrawing = true;
             this.startX = p.x;
             this.startY = p.y;
         });
+        
         this.canvas.addEventListener('mousemove', (e) => {
             if (!this.isDrawing) return;
             const p = this._getPos(e);
@@ -43,26 +45,81 @@ class ZoneBuilder {
                 w: Math.abs(p.x - this.startX),
                 h: Math.abs(p.y - this.startY)
             };
-            this.render();
+            this.requestRender();
         });
-        this.canvas.addEventListener('mouseup', () => {
+
+        this.canvas.addEventListener('mouseup', (e) => {
             if (this.isDrawing && this.currentRect && this.currentRect.w > 10 && this.currentRect.h > 10) {
-                const name = prompt(`Name this zone:`, `Zone_${String.fromCharCode(65 + this.zones.length)}`);
-                if (name && name.trim()) {
-                    this.zones.push({ ...this.currentRect, name: name.trim() });
-                }
+                this.isDrawing = false;
+                this._showNamingUI(e.clientX, e.clientY);
+            } else {
+                this.isDrawing = false;
+                this.currentRect = null;
+                this.requestRender();
             }
-            this.isDrawing = false;
-            this.currentRect = null;
-            this.render();
         });
+
         this.canvas.addEventListener('mouseleave', () => {
             if (this.isDrawing) {
                 this.isDrawing = false;
                 this.currentRect = null;
-                this.render();
+                this.requestRender();
             }
         });
+    }
+
+    requestRender() {
+        if (this._renderPending) return;
+        this._renderPending = true;
+        requestAnimationFrame(() => {
+            this.render();
+            this._renderPending = false;
+        });
+    }
+
+    _showNamingUI(clientX, clientY) {
+        this.namingMode = true;
+        const pop = document.getElementById('zone-namer-popover');
+        const inp = document.getElementById('input-zone-name');
+        const ok = document.getElementById('btn-confirm-zone');
+        const cancel = document.getElementById('btn-cancel-zone');
+
+        const rect = this.canvas.getBoundingClientRect();
+        pop.style.left = `${clientX - rect.left + 10}px`;
+        pop.style.top = `${clientY - rect.top + 10}px`;
+        // Constrain popover to canvas
+        if (clientX - rect.left + 230 > rect.width) pop.style.left = `${clientX - rect.left - 230}px`;
+        if (clientY - rect.top + 100 > rect.height) pop.style.top = `${clientY - rect.top - 100}px`;
+
+        pop.style.display = 'flex';
+        inp.value = `Zone_${String.fromCharCode(65 + this.zones.length)}`;
+        inp.focus();
+        inp.select();
+
+        const cleanup = () => {
+            pop.style.display = 'none';
+            this.namingMode = false;
+            this.currentRect = null;
+            this.requestRender();
+            ok.onclick = null;
+            cancel.onclick = null;
+            inp.onkeydown = null;
+        };
+
+        const confirm = () => {
+            const name = inp.value.trim();
+            if (name) {
+                this.zones.push({ ...this.currentRect, name });
+            }
+            cleanup();
+        };
+
+        ok.onclick = confirm;
+        cancel.onclick = cleanup;
+        inp.onkeydown = (ev) => {
+            if (ev.key === 'Enter') confirm();
+            if (ev.key === 'Escape') cleanup();
+        };
     }
 
     render() {

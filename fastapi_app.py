@@ -50,43 +50,45 @@ _HOTSPOTS = {
     # Zone C (Y: 280-520)
     "Zone_C":[(200,400,65,.8),(450,440,55,.6),(700,380,50,.55)],
 }
-_MAX_DENSITY = 3.0 # Saturation point for heatmap (p/m^2) - Lowered for extreme vibrancy
+_MAX_DENSITY = 10.0 # Match simulation max
 
 def _heat_rgba(v):
-    # Neon palette for high-contrast visibility on dark themes
-    if v < 0.01: return (0,0,0,0)
+    # Standard High-Contrast Thermal Scale
+    if v < 0.05: return (0, 0, 0, 0) # Clear transparency for empty space
     t = max(0., min(1., v))
     
-    # Very high alpha floor for glow effect
-    alpha = int(180 + 75 * t)
+    # Adaptive alpha: semi-transparent for low heat, solid for high heat
+    alpha = int(100 + 155 * t)
     
-    if t < 0.25: # Neon Cyan-Blue
+    if t < 0.25: # Cool (Deep Blue to Cyan)
         s = t / 0.25
-        return (0, int(200 + 55*s), 255, alpha)
-    elif t < 0.5: # Bright Cyan-Green
+        return (0, int(150 * s), 255, alpha)
+    elif t < 0.5: # Moderate (Cyan to Green)
         s = (t - 0.25) / 0.25
-        return (0, 255, int(255*(1-s)), alpha)
-    elif t < 0.75: # Neon Green-Yellow
+        return (0, 255, int(255 * (1 - s)), alpha)
+    elif t < 0.75: # Warning (Green to Yellow)
         s = (t - 0.5) / 0.25
-        return (int(255*s), 255, 0, alpha)
-    else: # Neon Yellow-Red
+        return (int(255 * s), 255, 0, alpha)
+    else: # Danger (Yellow to Deep Red)
         s = (t - 0.75) / 0.25
-        return (255, int(255*(1-s)), 0, alpha)
+        return (255, int(255 * (1 - s)), 0, alpha)
 
 def _build_heat_png(zd, VW=900, VH=520, CR=180, RR=104):
     """Default heatmap using predefined hotspots for Zone_A/B/C."""
+    # Create a normalized lookup map for current data
+    zd_norm = { _normalize_name(k): v for k, v in zd.items() }
+    
     buf = np.zeros(CR * RR, dtype=np.float32)
     for zid, spots in _HOTSPOTS.items():
-        d = float(zd.get(zid, 1.5))
-        # Non-linear boost: square root ensures low densities still show up significantly
-        w = float(np.clip((d / _MAX_DENSITY)**0.5, 0.1, 1.5))
+        # Match using normalized ID
+        d = float(zd_norm.get(_normalize_name(zid), 0.0))
+        # Use a slight non-linear boost for visibility of lower densities
+        w = float(np.clip(math.pow(d / _MAX_DENSITY, 0.7), 0.0, 1.0))
         for cx, cy, sig, base in spots:
             cx_n = cx / VW * CR
             cy_n = cy / VH * RR
-            # Tighter spots for better definition
-            sig_n = (sig / VW * CR) * (0.7 + w * 0.5)
-            # High amplitude multiplier for better peak visibility
-            amp = base * w * 1.8
+            sig_n = (sig / VW * CR) * (0.8 + w * 0.4)
+            amp = base * w * 2.5 # Increased base amplitude
             # Vectorized Gaussian
             cols = np.arange(CR, dtype=np.float32)
             rows = np.arange(RR, dtype=np.float32)
@@ -94,7 +96,6 @@ def _build_heat_png(zd, VW=900, VH=520, CR=180, RR=104):
             dr = rows - cy_n
             buf += amp * np.exp(-(dc[np.newaxis, :] ** 2 + dr[:, np.newaxis] ** 2) / (2 * sig_n ** 2)).ravel()
     
-    # Clip to [0, 1] - no relative normalization
     buf = np.clip(buf, 0.0, 1.0)
     img = np.zeros((RR, CR, 4), dtype=np.uint8)
     for i in range(RR * CR):
@@ -109,6 +110,9 @@ def _build_heat_png(zd, VW=900, VH=520, CR=180, RR=104):
 
 def _build_custom_heat(custom_zones: List[Dict], zd: Dict[str, float], VW=900, VH=520, CR=180, RR=104):
     """Heatmap for user-drawn zones: Fills the rectangular area of each zone, scaled by density."""
+    # Create a normalized lookup map
+    zd_norm = { _normalize_name(k): v for k, v in zd.items() }
+
     buf = np.zeros((RR, CR), dtype=np.float32)
     for z in custom_zones:
         # Scale coordinates from 900x520 to CRxRR
@@ -117,10 +121,11 @@ def _build_custom_heat(custom_zones: List[Dict], zd: Dict[str, float], VW=900, V
         x2 = int(min(CR, (z['x'] + z['w']) / VW * CR))
         y2 = int(min(RR, (z['y'] + z['h']) / VH * RR))
         
-        # Robust lookup: handles Zone A vs Zone_A vs zone a
+        # Robust lookup
         zname_norm = _normalize_name(z['name'])
-        density = float(zd.get(zname_norm, 0.0))
-        val = float(np.clip(density / _MAX_DENSITY, 0.0, 1.2))
+        density = float(zd_norm.get(zname_norm, 0.0))
+        # Boost visibility for non-empty areas
+        val = float(np.clip(math.pow(density / _MAX_DENSITY, 0.6), 0.0, 1.2))
         
         # Fill the zone area - using max to handle overlapping zones cleanly
         if x2 > x1 and y2 > y1:
@@ -132,8 +137,8 @@ def _build_custom_heat(custom_zones: List[Dict], zd: Dict[str, float], VW=900, V
         for c in range(CR):
             img[r, c] = list(_heat_rgba(float(buf[r, c])))
             
-    # Apply a heavy blur to make the hard rectangles look like a real heatmap
-    pil = PI.fromarray(img, mode="RGBA").filter(ImageFilter.GaussianBlur(radius=12))  # type: ignore
+    # Apply a moderate blur (8 was too much and washed out low heat)
+    pil = PI.fromarray(img, mode="RGBA").filter(ImageFilter.GaussianBlur(radius=4))  # type: ignore
     bio = BytesIO()
     pil.save(bio, format="PNG")  # type: ignore
     return "data:image/png;base64," + base64.b64encode(bio.getvalue()).decode()
@@ -324,8 +329,16 @@ def get_ai_overview():
     zone_data = {}
     from src.aws_bedrock import generate_situation_overview
     
-    for zone in state.zones:
-        hist = state.zone_data[zone].iloc[max(0, state.step - 50):state.step + 1].copy()
+    # Get the same data as the dashboard to ensure consistency
+    current_data = state.get_current_data()
+    active_zones = current_data.get("zones", {})
+    
+    for zone_id, data in active_zones.items():
+        # Map back to simulation zone for history
+        src_map = { _normalize_name(z): z for z in state.zones }
+        src_zone = src_map.get(_normalize_name(zone_id), state.zones[0])
+        
+        hist = state.zone_data[src_zone].iloc[max(0, state.step - 50):state.step + 1].copy()
         if len(hist) == 0:
             continue
             
@@ -333,20 +346,19 @@ def get_ai_overview():
         feats = get_realtime_features(hist)
         
         if feats:
-            pred = predict_zone(zone, feats, state.model, state.scaler)
-            zone_data[zone] = {
-                "risk_probability": pred.risk_probability,
-                "risk_level": pred.risk_level,
-                "density": float(current_row["density"]),
-                "velocity": float(current_row["velocity"]),
-                "time_to_congestion": pred.time_to_congestion
+            zone_data[zone_id] = {
+                "risk_probability": data.get("risk_probability", 0),
+                "risk_level": data.get("risk_level", "green"),
+                "density": data.get("density", 0.0),
+                "velocity": data.get("velocity", 0.0),
+                "time_to_congestion": data.get("time_to_congestion", 0)
             }
         else:
-            zone_data[zone] = {
+            zone_data[zone_id] = {
                 "risk_probability": 0.0,
                 "risk_level": "green",
-                "density": float(current_row["density"]),
-                "velocity": float(current_row["velocity"]),
+                "density": data.get("density", 0.0),
+                "velocity": data.get("velocity", 0.0),
                 "time_to_congestion": 0.0
             }
             

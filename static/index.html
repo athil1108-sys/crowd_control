@@ -332,6 +332,15 @@
                         <div class="canvas-container">
                             <div style="position:relative; background:#07111E; border-radius:8px; overflow:hidden; border: 1px solid rgba(255,255,255,0.05);">
                                 <canvas id="builder-canvas" width="900" height="520" style="width:100%; display:block; cursor:crosshair;"></canvas>
+                                <!-- Zone Naming Popover -->
+                                <div id="zone-namer-popover" style="display:none; position:absolute; background:#0f1c2d; border:1px solid var(--cyan); border-radius:8px; padding:12px; box-shadow:0 8px 24px rgba(0,0,0,0.6); z-index:1000; width:220px; flex-direction:column; gap:8px;">
+                                    <div style="font-size:10px; color:var(--cyan); font-weight:700; font-family:'JetBrains Mono';">NEW ZONE NAME</div>
+                                    <input type="text" id="input-zone-name" placeholder="e.g. Zone A" style="background:#050a11; border:1px solid #1a3050; color:#fff; border-radius:4px; padding:8px; font-size:12px; font-family:'Inter'; outline:none; width: 100%; box-sizing: border-box;">
+                                    <div style="display:flex; gap:6px;">
+                                        <button id="btn-confirm-zone" style="flex:1; background:var(--green); color:#000; border:none; border-radius:4px; padding:6px; font-weight:700; font-size:10px; cursor:pointer;">CONFIRM</button>
+                                        <button id="btn-cancel-zone" style="flex:1; background:transparent; border:1px solid #1a3050; color:var(--text-muted); border-radius:4px; padding:6px; font-weight:700; font-size:10px; cursor:pointer;">CANCEL</button>
+                                    </div>
+                                </div>
                                 <div id="builder-hint" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:var(--text-muted);font-size:14px;pointer-events:none;text-align:center; display: flex; flex-direction: column; gap: 15px; align-items: center;">
                                     <div style="font-size: 40px; opacity: 0.5;">🖼️</div>
                                     <div>Upload a venue blueprint to start drawing</div>
@@ -415,8 +424,8 @@
         </main>
     </div>
 
-    <script src="/static/js/zone_builder.js"></script>
-    <script src="/static/js/script.js"></script>
+    <script src="/static/js/zone_builder.js?v=2"></script>
+    <script src="/static/js/script.js?v=2"></script>
 </body>
 
 </html>

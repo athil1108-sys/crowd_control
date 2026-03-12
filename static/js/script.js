@@ -158,10 +158,40 @@ function initMapOverlay() {
         margin: { l: 0, r: 0, t: 0, b: 0 },
         xaxis: { range: [0, VW], visible: false, fixedrange: true },
         yaxis: { range: [0, VH], visible: false, fixedrange: true },
-        shapes: shapes, annotations: annotations, showlegend: false, hovermode: false, dragmode: false
+        shapes: shapes, annotations: annotations, showlegend: false, hovermode: 'closest', dragmode: false
     };
 
-    Plotly.newPlot('map-plotly', [{ x: [], y: [] }], layout, { displayModeBar: false, responsive: true });
+    const config = { displayModeBar: false, responsive: true, staticPlot: false };
+    
+    Plotly.react('map-plotly', [{ x: [], y: [] }], layout, config);
+
+    // Add click handler for zone selection
+    const plotEl = document.getElementById('map-plotly');
+    if (!plotEl._wired) {
+        plotEl._wired = true;
+        plotEl.on('plotly_click', (data) => {
+            // Find which zone was clicked based on bounds
+            const x = data.points[0].x;
+            const y = data.points[0].y;
+            // Since shapes aren't "clickable" traces, we check mouse pos against zone bounds
+            const apiZoneKeys = Object.keys(zoneHistories);
+            // We use the scaled bounds used in rendering
+            const _Z_BOUNDS_SCALED = {
+                "Zone_A": [0, 0, 900, 140],
+                "Zone_B": [0, 140, 900, 140],
+                "Zone_C": [0, 280, 900, 240]
+            };
+            
+            for (const zid of apiZoneKeys) {
+                const b = _Z_BOUNDS_SCALED[zid];
+                if (b && x >= b[0] && x <= b[0] + b[2] && (VH - y) >= b[1] && (VH - y) <= b[1] + b[3]) {
+                    currentZone = zid;
+                    updateData();
+                    break;
+                }
+            }
+        });
+    }
 }
 
 // ── Application Logic ──
@@ -421,30 +451,40 @@ function updateChartsView(zonesObj) {
 }
 
 function renderIndividualChart(id, x, y, color, label, refVal) {
-    const trace1 = { x: x, y: y, fill: 'tozeroy', fillcolor: color + '15', type: 'scatter', mode: 'none', hoverinfo: 'skip' };
-    const trace2 = { x: x, y: y, type: 'scatter', mode: 'lines', line: { color: color, width: 2, shape: 'linear' }, hoverinfo: 'none' };
+    const trace1 = { 
+        x: x, y: y, fill: 'tozeroy', 
+        fillcolor: color + '10', // Reduced opacity for performance
+        type: 'scatter', mode: 'none', hoverinfo: 'skip' 
+    };
+    const trace2 = { 
+        x: x, y: y, type: 'scatter', mode: 'lines', 
+        line: { color: color, width: 2, shape: 'linear' }, 
+        hoverinfo: 'none' 
+    };
 
     const layout = JSON.parse(JSON.stringify(baseLayout));
     if (label) {
         layout.yaxis.title = { text: label, font: { size: 9, color: '#3d5070' } };
-        layout.margin.l = 40; // Extra left margin for label
+        layout.margin.l = 40;
     }
     
-    // Explicitly set x-axis range to prevent clipping on categorical axes
     layout.xaxis.range = [0, x.length - 1];
     
     if (refVal) {
         layout.shapes = [{
             type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: refVal, y1: refVal,
-            line: { color: 'rgba(239, 68, 68, 0.5)', width: 1, dash: 'dot' }
+            line: { color: 'rgba(239, 68, 68, 0.4)', width: 1, dash: 'dot' }
         }];
     }
 
-    let yMax = Math.max(...y) * 1.5;
-    if (yMax < refVal) yMax = refVal * 1.5;
-    layout.yaxis.range = [0, yMax];
+    let yMax = Math.max(...y) * 1.3;
+    if (refVal && yMax < refVal) yMax = refVal * 1.3;
+    layout.yaxis.range = [0, yMax || 10];
 
-    Plotly.react(id, [trace1, trace2], layout, { displayModeBar: false, responsive: true });
+    // Use requestAnimationFrame to prevent blocking the UI thread during heavy simulation updates
+    requestAnimationFrame(() => {
+        Plotly.react(id, [trace1, trace2], layout, { displayModeBar: false, responsive: true });
+    });
 }
 
 
@@ -706,4 +746,11 @@ function updateZoneList() {
 // Start loop
 initMapOverlay();
 updateData();
-updateInterval = setInterval(fetchTick, 2000);
+
+let _fetching = false;
+updateInterval = setInterval(async () => {
+    if (_fetching) return;
+    _fetching = true;
+    await fetchTick();
+    _fetching = false;
+}, 2000);
