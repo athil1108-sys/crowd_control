@@ -2,7 +2,7 @@
 # pyre-ignore-all-errors[21]
 AWS Bedrock Integration Module
 ==============================
-Uses Amazon Bedrock (Claude 3 Haiku) to generate:
+Uses Amazon Bedrock (Amazon Titan) to generate:
   1. Dynamic digital signage messages — context-aware crowd guidance
   2. Incident summaries — natural-language briefs for event organizers
 
@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 _bedrock_client = None
 _bedrock_available = None
 
-MODEL_ID = "anthropic.claude-3-haiku-20240307-v1:0"
+MODEL_ID = "amazon.titan-text-express-v1"
 AWS_REGION = "us-east-1"
 
 
@@ -88,10 +88,13 @@ def _invoke_bedrock(prompt: str, max_tokens: int = 100) -> Optional[str]:
 
     try:
         body = json.dumps({
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": max_tokens,
-            "temperature": 0.3,  # Low temp for consistent, safe messaging
-            "messages": [{"role": "user", "content": prompt}],
+            "inputText": prompt,
+            "textGenerationConfig": {
+                "maxTokenCount": max_tokens,
+                "stopSequences": [],
+                "temperature": 0.3,
+                "topP": 0.9,
+            }
         })
 
         response = client.invoke_model(
@@ -102,7 +105,7 @@ def _invoke_bedrock(prompt: str, max_tokens: int = 100) -> Optional[str]:
         )
 
         result = json.loads(response["body"].read())
-        return result["content"][0]["text"].strip()
+        return result["results"][0]["outputText"].strip()
 
     except Exception as e:
         logger.error(f"❌ Bedrock invocation failed: {e}")
