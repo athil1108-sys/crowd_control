@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 _bedrock_client = None
 _bedrock_available = None
 
-MODEL_ID = "amazon.titan-text-express-v1"
+MODEL_ID = "amazon.titan-text-premier-v1:0"
 AWS_REGION = "us-east-1"
 
 
