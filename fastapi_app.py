@@ -249,14 +249,21 @@ def get_ai_overview():
             }
             
     # Try to generate the overview
-    overview = generate_situation_overview(zone_data)
-    if not overview:
-        overview = """⚠️ **AI Overview Unavailable**
+    try:
+        overview = generate_situation_overview(zone_data)
+        if not overview:
+            # This case usually means internal error or empty result
+            overview = "⚠️ AI Overview received an empty response from Bedrock."
+    except Exception as e:
+        err_msg = str(e)
+        overview = f"""⚠️ **AI Overview Unavailable**
         
-Amazon Bedrock could not be reached. Please ensure:
-1. Your AWS Credentials are valid and loaded.
-2. The IAM Role has `bedrock:InvokeModel`.
-3. Model access for **Claude 3 Haiku** is requested and granted in the `us-east-1` region."""
+**Technical Error:** {err_msg}
+
+**Troubleshooting Steps:**
+1. **IAM Role:** Does your App Runner Instance Role have `bedrock:InvokeModel`?
+2. **Model Access:** Go to AWS Console -> Bedrock -> Model Access. Ensure 'Claude 3 Haiku' is **Access granted**.
+3. **Region:** Ensure you are using `us-east-1` (N. Virginia)."""
         
     return {"overview": overview}
 

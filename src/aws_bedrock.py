@@ -105,8 +105,9 @@ def _invoke_bedrock(prompt: str, max_tokens: int = 100) -> Optional[str]:
         return result["content"][0]["text"].strip()
 
     except Exception as e:
-        logger.warning(f"⚠️ Bedrock invocation failed: {e}")
-        return None
+        logger.error(f"❌ Bedrock invocation failed: {e}")
+        # Re-raise so the API layer can catch and display the specific error
+        raise e
 
 
 def generate_signage_message(
