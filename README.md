@@ -124,23 +124,6 @@ A completely native HTML/JS/CSS dashboard connected to the FastAPI backend:
 
 ---
 
-## 🎤 Hackathon Demo Script
-
-### Opening (30 seconds)
-> "We built CrowdAI — an AI system that predicts crowd congestion 10-15 minutes before it happens, giving organizers time to act. In real deployment, this uses mmWave radar for complete privacy — no cameras, no facial recognition."
-
-### Demo Flow (2-3 minutes)
-1. **Start with Normal Day** — Show green indicators, normal flow
-2. **Wait for first congestion** — Watch density rise, velocity drop
-3. **Point out the prediction** — "See? The model flagged Yellow BEFORE the spike"
-4. **Show the signage trigger** — "At 70% risk, it automatically sends redirect messages"
-5. **Switch to Emergency** — "Here's worst case — all zones spike, instant red alerts"
-
-### Closing (30 seconds)
-> "The key innovation: we predict congestion, not just detect it. 10-15 minutes of warning means you can redirect crowds BEFORE bottlenecks form. And with mmWave radar, it's completely privacy-preserving — no personal data ever collected."
-
----
-
 ## 🔬 Technical Details
 
 ### Congestion Physics
